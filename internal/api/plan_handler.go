@@ -3,6 +3,7 @@ package api
 import (
 	"errors"
 	"net/http"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
@@ -20,6 +21,8 @@ type planInput struct {
 	ChamberID string          `json:"chamber_id"`
 	Direction model.Direction `json:"direction"`
 	Vessels   []vesselInput   `json:"vessels"`
+	Priority  int             `json:"priority"`
+	ETA       *time.Time      `json:"eta"`
 }
 
 func createPlanHandler(runtime *Runtime) http.HandlerFunc {
@@ -38,7 +41,7 @@ func createPlanHandler(runtime *Runtime) http.HandlerFunc {
 			}
 			vessels = append(vessels, vessel)
 		}
-		plan, err := runtime.Schedule.Create(r.Context(), input.ChamberID, input.Direction, vessels)
+		plan, err := runtime.Schedule.Create(r.Context(), input.ChamberID, input.Direction, vessels, input.Priority, input.ETA)
 		if err != nil {
 			writeError(w, http.StatusConflict, err)
 			return
@@ -49,6 +52,42 @@ func createPlanHandler(runtime *Runtime) http.HandlerFunc {
 			return
 		}
 		writeJSON(w, http.StatusCreated, map[string]any{"plan": plan, "cycle": cycleValue})
+	}
+}
+
+type adjustInput struct {
+	Priority int        `json:"priority"`
+	ETA      *time.Time `json:"eta"`
+}
+
+// adjustPlanHandler updates the dispatch order of a plan that has not
+// started; the queue, plan list and admission decisions all follow the new
+// sorting basis immediately.
+func adjustPlanHandler(runtime *Runtime) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		planID, err := uuid.Parse(chi.URLParam(r, "planID"))
+		if err != nil {
+			writeError(w, http.StatusBadRequest, err)
+			return
+		}
+		var input adjustInput
+		if err := decodeJSON(r, &input); err != nil {
+			writeError(w, http.StatusBadRequest, err)
+			return
+		}
+		if err := model.CheckPriority(input.Priority); err != nil {
+			writeError(w, http.StatusBadRequest, err)
+			return
+		}
+		plan, err := runtime.Schedule.Adjust(r.Context(), planID, input.Priority, input.ETA)
+		if err != nil {
+			writeError(w, http.StatusConflict, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{
+			"plan":  plan,
+			"queue": runtime.Admission.List(plan.ChamberID),
+		})
 	}
 }
 

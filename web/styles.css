@@ -53,6 +53,12 @@ th { color: #91a0a8; font-weight: 600; }
 .status.warning::before { background: #f2c14e; }
 .status.critical::before { background: #ef6f6c; }
 .message { min-height: 22px; color: #f2c14e; font-size: 13px; margin-top: 10px; white-space: pre-wrap; }
+.adjust-row { display: grid; grid-template-columns: 64px 1fr auto; gap: 6px; align-items: center; }
+.adjust-row input { min-height: 32px; padding: 4px 8px; }
+.adjust-row button { min-height: 32px; padding: 4px 10px; }
+.queue-list { margin: 6px 0 0; padding-left: 18px; font-size: 13px; }
+.queue-list li { margin-bottom: 4px; }
+.queue-list .released { color: #91a0a8; }
 @media (max-width: 780px) {
   header { height: auto; padding: 14px 18px; align-items: flex-start; flex-direction: column; gap: 10px; }
   main { padding: 20px 16px 40px; }

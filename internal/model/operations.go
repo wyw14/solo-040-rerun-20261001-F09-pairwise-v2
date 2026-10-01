@@ -2,6 +2,7 @@ package model
 
 import (
 	"errors"
+	"fmt"
 	"time"
 
 	"github.com/google/uuid"
@@ -21,29 +22,87 @@ func NewVessel(name, callSign string, lengthM float64) (Vessel, error) {
 	return Vessel{ID: uuid.New(), Name: name, CallSign: callSign, LengthM: lengthM}, nil
 }
 
+// MaxPriority bounds the operator-assignable dispatch priority (0 = normal).
+const MaxPriority = 9
+
 type ConvoyPlan struct {
-	ID         uuid.UUID `json:"id"`
-	ChamberID  string    `json:"chamber_id"`
-	Direction  Direction `json:"direction"`
-	Vessels    []Vessel  `json:"vessels"`
-	CreatedAt  time.Time `json:"created_at"`
-	Cancelled  bool      `json:"cancelled"`
-	CancelNote string    `json:"cancel_note,omitempty"`
+	ID         uuid.UUID  `json:"id"`
+	ChamberID  string     `json:"chamber_id"`
+	Direction  Direction  `json:"direction"`
+	Vessels    []Vessel   `json:"vessels"`
+	Priority   int        `json:"priority"`
+	ETA        *time.Time `json:"eta,omitempty"`
+	CreatedAt  time.Time  `json:"created_at"`
+	Cancelled  bool       `json:"cancelled"`
+	CancelNote string     `json:"cancel_note,omitempty"`
 }
 
-func NewConvoyPlan(chamberID string, direction Direction, vessels []Vessel, now time.Time) (ConvoyPlan, error) {
+func NewConvoyPlan(chamberID string, direction Direction, vessels []Vessel, priority int, eta *time.Time, now time.Time) (ConvoyPlan, error) {
 	if chamberID == "" || !direction.Valid() || len(vessels) == 0 {
 		return ConvoyPlan{}, errors.New("plan requires chamber, direction and vessels")
 	}
+	if err := CheckPriority(priority); err != nil {
+		return ConvoyPlan{}, err
+	}
 	copyOfVessels := append([]Vessel(nil), vessels...)
-	return ConvoyPlan{
+	plan := ConvoyPlan{
 		ID: uuid.New(), ChamberID: chamberID, Direction: direction,
-		Vessels: copyOfVessels, CreatedAt: now.UTC(),
-	}, nil
+		Vessels: copyOfVessels, Priority: priority, CreatedAt: now.UTC(),
+	}
+	if eta != nil {
+		arrival := eta.UTC()
+		plan.ETA = &arrival
+	}
+	return plan, nil
+}
+
+func CheckPriority(priority int) error {
+	if priority < 0 || priority > MaxPriority {
+		return fmt.Errorf("priority must be between 0 and %d", MaxPriority)
+	}
+	return nil
+}
+
+// DispatchOrder is the sorting basis shared by the admission queue and plan
+// listings: higher priority first, then earlier expected arrival, then
+// first-come-first-served by creation time.
+type DispatchOrder struct {
+	Priority int       `json:"priority"`
+	Arrival  time.Time `json:"arrival"`
+	Created  time.Time `json:"created"`
+	PlanID   uuid.UUID `json:"plan_id"`
+}
+
+// DispatchOrder derives the plan's sort key; ETA overrides the arrival basis.
+func (p ConvoyPlan) DispatchOrder() DispatchOrder {
+	arrival := p.CreatedAt
+	if p.ETA != nil {
+		arrival = *p.ETA
+	}
+	return DispatchOrder{Priority: p.Priority, Arrival: arrival, Created: p.CreatedAt, PlanID: p.ID}
+}
+
+// Less orders by descending priority, then ascending expected arrival, then
+// FCFS insertion order with the plan id as final deterministic tiebreak.
+func (o DispatchOrder) Less(other DispatchOrder) bool {
+	if o.Priority != other.Priority {
+		return o.Priority > other.Priority
+	}
+	if !o.Arrival.Equal(other.Arrival) {
+		return o.Arrival.Before(other.Arrival)
+	}
+	if !o.Created.Equal(other.Created) {
+		return o.Created.Before(other.Created)
+	}
+	return o.PlanID.String() < other.PlanID.String()
 }
 
 func (p ConvoyPlan) Clone() ConvoyPlan {
 	p.Vessels = append([]Vessel(nil), p.Vessels...)
+	if p.ETA != nil {
+		eta := *p.ETA
+		p.ETA = &eta
+	}
 	return p
 }
 

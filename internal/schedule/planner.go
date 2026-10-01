@@ -32,8 +32,8 @@ func NewPlanner(admissionService *admission.Service, recorder *journal.Recorder,
 	}
 }
 
-func (p *Planner) Create(ctx context.Context, chamberID string, direction model.Direction, vessels []model.Vessel) (model.ConvoyPlan, error) {
-	plan, err := model.NewConvoyPlan(chamberID, direction, vessels, p.now())
+func (p *Planner) Create(ctx context.Context, chamberID string, direction model.Direction, vessels []model.Vessel, priority int, eta *time.Time) (model.ConvoyPlan, error) {
+	plan, err := model.NewConvoyPlan(chamberID, direction, vessels, priority, eta, p.now())
 	if err != nil {
 		return model.ConvoyPlan{}, err
 	}
@@ -53,6 +53,39 @@ func (p *Planner) Create(ctx context.Context, chamberID string, direction model.
 	return plan.Clone(), nil
 }
 
+// Adjust updates the scheduling attributes of a plan that has not started
+// and keeps the admission queue consistent with the new dispatch order.
+func (p *Planner) Adjust(ctx context.Context, planID uuid.UUID, priority int, eta *time.Time) (model.ConvoyPlan, error) {
+	if err := model.CheckPriority(priority); err != nil {
+		return model.ConvoyPlan{}, err
+	}
+	plan, err := p.require(planID)
+	if err != nil {
+		return model.ConvoyPlan{}, err
+	}
+	if plan.Cancelled {
+		return model.ConvoyPlan{}, errors.New("cancelled plans cannot be adjusted")
+	}
+	if p.admission.PlanStarted(plan.ChamberID, plan.ID) {
+		return model.ConvoyPlan{}, errors.New("plan already started; released vessels cannot be reordered")
+	}
+	plan.Priority = priority
+	if eta != nil {
+		arrival := eta.UTC()
+		plan.ETA = &arrival
+	} else {
+		plan.ETA = nil
+	}
+	p.replace(plan)
+	p.admission.ReorderPlan(plan.ChamberID, plan)
+	if _, err := p.recorder.Record(ctx, plan.ChamberID, model.EventPlanUpdated, plan.ID, 0, map[string]any{
+		"plan_id": plan.ID, "priority": plan.Priority, "eta": plan.ETA, "at": p.now().UTC(),
+	}); err != nil {
+		return model.ConvoyPlan{}, err
+	}
+	return plan.Clone(), nil
+}
+
 func (p *Planner) Get(planID uuid.UUID) (model.ConvoyPlan, bool) {
 	p.mu.RLock()
 	plan, ok := p.plans[planID]
@@ -66,6 +99,8 @@ func (p *Planner) replace(plan model.ConvoyPlan) {
 	p.mu.Unlock()
 }
 
+// Active lists non-cancelled plans in the same dispatch order the admission
+// queue uses, so the plan list and the queue never disagree.
 func (p *Planner) Active(chamberID string) []model.ConvoyPlan {
 	p.mu.RLock()
 	var result []model.ConvoyPlan
@@ -75,7 +110,9 @@ func (p *Planner) Active(chamberID string) []model.ConvoyPlan {
 		}
 	}
 	p.mu.RUnlock()
-	sort.Slice(result, func(i, j int) bool { return result[i].CreatedAt.Before(result[j].CreatedAt) })
+	sort.Slice(result, func(i, j int) bool {
+		return result[i].DispatchOrder().Less(result[j].DispatchOrder())
+	})
 	return result
 }
 

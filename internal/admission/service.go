@@ -4,6 +4,7 @@ import (
 	"context"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/wyw14/cry-96/internal/journal"
 	"github.com/wyw14/cry-96/internal/model"
 )
@@ -23,11 +24,11 @@ func NewService(controller *Controller, recorder *journal.Recorder, now func() t
 }
 
 func (s *Service) Enqueue(ctx context.Context, plan model.ConvoyPlan) error {
-	if err := s.controller.queue.Add(plan.ChamberID, plan.ID, plan.Vessels); err != nil {
+	if err := s.controller.queue.Add(plan.ChamberID, plan); err != nil {
 		return err
 	}
 	_, err := s.recorder.Record(ctx, plan.ChamberID, model.EventPlanCreated, plan.ID, 0, map[string]any{
-		"plan_id": plan.ID, "queued": len(plan.Vessels), "at": s.now().UTC(),
+		"plan_id": plan.ID, "queued": len(plan.Vessels), "priority": plan.Priority, "eta": plan.ETA, "at": s.now().UTC(),
 	})
 	return err
 }
@@ -43,6 +44,17 @@ func (s *Service) Admit(ctx context.Context, cycle model.TransitCycle) (Decision
 
 func (s *Service) RemovePlan(chamberID string, plan model.ConvoyPlan) []QueueEntry {
 	return s.controller.queue.RemovePlan(chamberID, plan.ID)
+}
+
+// ReorderPlan re-sorts the waiting tail of a chamber queue after a plan's
+// scheduling attributes changed.
+func (s *Service) ReorderPlan(chamberID string, plan model.ConvoyPlan) {
+	s.controller.queue.Reorder(chamberID, plan)
+}
+
+// PlanStarted reports whether the plan already has released vessels.
+func (s *Service) PlanStarted(chamberID string, planID uuid.UUID) bool {
+	return s.controller.queue.PlanStarted(chamberID, planID)
 }
 
 func (s *Service) Restore(chamberID string, entries []QueueEntry) {

@@ -9,10 +9,14 @@
     <section class="panel"><h2>Create convoy plan</h2><form id="plan-form">
       <div class="form-row"><div><label for="chamber">Chamber</label><select id="chamber"><option>chamber-1</option><option>chamber-2</option></select></div><div><label for="direction">Direction</label><select id="direction"><option value="upstream">Upstream</option><option value="downstream">Downstream</option></select></div><div><label for="length">Length (m)</label><input id="length" type="number" value="86" min="1"></div></div>
       <div class="form-row"><div><label for="vessel">Vessel</label><input id="vessel" value="River Star"></div><div><label for="call-sign">Call sign</label><input id="call-sign" value="RS-204"></div><div><label>&nbsp;</label><button type="submit">Create and admit</button></div></div>
+      <div class="form-row"><div><label for="priority">Priority (0-9, higher first)</label><input id="priority" type="number" value="0" min="0" max="9"></div><div><label for="eta">Expected arrival (optional)</label><input id="eta" type="datetime-local"></div><div></div></div>
       <div class="message" id="plan-message"></div>
     </form></section>
     <section class="panel"><h2>Current transit</h2><div class="metrics"><div class="metric">Chamber<strong id="metric-chamber">-</strong></div><div class="metric">Stage<strong id="metric-stage">-</strong></div><div class="metric">Cycle<strong id="metric-cycle">-</strong></div></div></section>
-    <section class="panel wide"><h2>Active plans</h2><table><thead><tr><th>Chamber</th><th>Plan</th><th>Direction</th><th>Vessels</th><th>Created</th></tr></thead><tbody id="plans"></tbody></table></section>
+    <section class="panel wide"><h2>Active plans</h2>
+      <div class="muted" id="sort-basis">Sorted by priority (higher first), then expected arrival (ETA, otherwise creation time), then first-come-first-served. Released vessels keep their queue slots and are never reordered.</div>
+      <table><thead><tr><th>Chamber</th><th>Plan</th><th>Direction</th><th>Vessels</th><th>Priority</th><th>ETA</th><th>Created</th><th>Adjust (unstarted only)</th></tr></thead><tbody id="plans"></tbody></table>
+    </section>
   </div>
 </main><script src="/assets/app.js"></script><script src="/assets/operations.js"></script>
 </body></html>
