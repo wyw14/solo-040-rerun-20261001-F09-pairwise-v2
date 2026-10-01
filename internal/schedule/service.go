@@ -3,6 +3,7 @@ package schedule
 import (
 	"context"
 	"errors"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/wyw14/cry-96/internal/model"
@@ -19,8 +20,14 @@ func NewService(planner *Planner, publisher *signal.Publisher) *Service {
 	return &Service{planner: planner, publisher: publisher}
 }
 
-func (s *Service) Create(ctx context.Context, chamberID string, direction model.Direction, vessels []model.Vessel) (model.ConvoyPlan, error) {
-	return s.planner.Create(ctx, chamberID, direction, vessels)
+func (s *Service) Create(ctx context.Context, chamberID string, direction model.Direction, vessels []model.Vessel, preferences model.PlanPreferences) (model.ConvoyPlan, error) {
+	return s.planner.Create(ctx, chamberID, direction, vessels, preferences)
+}
+
+// SetSchedule adjusts priority/ETA of a not-yet-released plan and keeps the
+// admission queue, plan list and subsequent admission decisions aligned.
+func (s *Service) SetSchedule(ctx context.Context, planID uuid.UUID, priority model.PlanPriority, eta *time.Time) (model.ConvoyPlan, error) {
+	return s.planner.SetSchedule(ctx, planID, ScheduleUpdate{Priority: priority, ETA: eta})
 }
 
 func (s *Service) Publish(ctx context.Context, planID uuid.UUID, cycle model.TransitCycle) (signal.Publication, error) {

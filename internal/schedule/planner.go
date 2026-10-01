@@ -32,8 +32,8 @@ func NewPlanner(admissionService *admission.Service, recorder *journal.Recorder,
 	}
 }
 
-func (p *Planner) Create(ctx context.Context, chamberID string, direction model.Direction, vessels []model.Vessel) (model.ConvoyPlan, error) {
-	plan, err := model.NewConvoyPlan(chamberID, direction, vessels, p.now())
+func (p *Planner) Create(ctx context.Context, chamberID string, direction model.Direction, vessels []model.Vessel, preferences model.PlanPreferences) (model.ConvoyPlan, error) {
+	plan, err := model.NewConvoyPlan(chamberID, direction, vessels, preferences, p.now())
 	if err != nil {
 		return model.ConvoyPlan{}, err
 	}
@@ -48,6 +48,57 @@ func (p *Planner) Create(ctx context.Context, chamberID string, direction model.
 		delete(p.plans, plan.ID)
 		p.mu.Unlock()
 		p.admission.RemovePlan(chamberID, plan)
+		return model.ConvoyPlan{}, err
+	}
+	return plan.Clone(), nil
+}
+
+// ScheduleUpdate carries partial adjustments to a waiting plan. A zero
+// Priority leaves priority unchanged; a nil ETA leaves ETA unchanged, while a
+// pointer to the zero time clears it.
+type ScheduleUpdate struct {
+	Priority model.PlanPriority
+	ETA      *time.Time
+}
+
+// SetSchedule adjusts priority/ETA of a plan that has not started moving and
+// replans the admission queue so the change is reflected in admission order.
+// Released and cancelled plans are rejected.
+func (p *Planner) SetSchedule(ctx context.Context, planID uuid.UUID, update ScheduleUpdate) (model.ConvoyPlan, error) {
+	plan, err := p.require(planID)
+	if err != nil {
+		return model.ConvoyPlan{}, err
+	}
+	if plan.Cancelled {
+		return model.ConvoyPlan{}, errors.New("cancelled plan cannot be rescheduled")
+	}
+	preferences := model.PlanPreferences{Priority: plan.Priority, ETA: plan.ETA}
+	if update.Priority != 0 {
+		if !update.Priority.Valid() {
+			return model.ConvoyPlan{}, errors.New("plan priority is out of range")
+		}
+		preferences.Priority = update.Priority
+	}
+	if update.ETA != nil {
+		preferences.ETA = update.ETA.UTC()
+	}
+	queued, err := p.admission.SetSchedule(plan.ChamberID, plan, preferences)
+	if err != nil {
+		return model.ConvoyPlan{}, err
+	}
+	if !queued {
+		return model.ConvoyPlan{}, errors.New("plan is not waiting in the admission queue")
+	}
+	previous := model.PlanPreferences{Priority: plan.Priority, ETA: plan.ETA}
+	plan.Priority, plan.ETA = preferences.Priority, preferences.ETA
+	p.replace(plan)
+	if _, err := p.recorder.Record(ctx, plan.ChamberID, model.EventPlanScheduleChanged, plan.ID, 0, map[string]any{
+		"plan_id": plan.ID, "priority": plan.Priority, "eta": plan.ETA, "at": p.now().UTC(),
+	}); err != nil {
+		// Roll the queue and plan back so memory state stays consistent.
+		p.admission.SetSchedule(plan.ChamberID, plan, previous)
+		plan.Priority, plan.ETA = previous.Priority, previous.ETA
+		p.replace(plan)
 		return model.ConvoyPlan{}, err
 	}
 	return plan.Clone(), nil
@@ -75,7 +126,27 @@ func (p *Planner) Active(chamberID string) []model.ConvoyPlan {
 		}
 	}
 	p.mu.RUnlock()
-	sort.Slice(result, func(i, j int) bool { return result[i].CreatedAt.Before(result[j].CreatedAt) })
+	// Mirror the admission queue so the plan list and admission decisions
+	// always agree; plans absent from the queue (fully admitted) trail behind.
+	order := p.admission.PlanOrder(chamberID)
+	position := make(map[uuid.UUID]int, len(order))
+	for index, planID := range order {
+		position[planID] = index
+	}
+	sort.SliceStable(result, func(i, j int) bool {
+		left, leftOK := position[result[i].ID]
+		right, rightOK := position[result[j].ID]
+		switch {
+		case leftOK && rightOK:
+			return left < right
+		case leftOK:
+			return true
+		case rightOK:
+			return false
+		default:
+			return result[i].CreatedAt.Before(result[j].CreatedAt)
+		}
+	})
 	return result
 }
 

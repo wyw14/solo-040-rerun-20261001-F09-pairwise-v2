@@ -53,6 +53,14 @@ th { color: #91a0a8; font-weight: 600; }
 .status.warning::before { background: #f2c14e; }
 .status.critical::before { background: #ef6f6c; }
 .message { min-height: 22px; color: #f2c14e; font-size: 13px; margin-top: 10px; white-space: pre-wrap; }
+.small { font-size: 12px; }
+.badge { display: inline-block; padding: 2px 8px; border-radius: 10px; font-size: 12px; white-space: nowrap; }
+.badge-waiting { background: #243440; color: #9fd0ce; border: 1px solid #3a5660; }
+.badge-released { background: #33301f; color: #f2c14e; border: 1px solid #6b5f2b; }
+.schedule-form { display: flex; gap: 6px; align-items: center; flex-wrap: nowrap; }
+.schedule-form input, .schedule-form select { min-height: 32px; padding: 4px 8px; font-size: 12px; }
+.schedule-form button { min-height: 32px; padding: 4px 10px; font-size: 12px; }
+h3 { font-size: 14px; margin: 16px 0 8px; }
 @media (max-width: 780px) {
   header { height: auto; padding: 14px 18px; align-items: flex-start; flex-direction: column; gap: 10px; }
   main { padding: 20px 16px 40px; }
